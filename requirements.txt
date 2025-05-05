@@ -1,0 +1,11 @@
+chainlit
+langgraph
+python-dotenv
+sqlalchemy[aiosqlite]
+aiosqlite
+langchain
+langchain-openai
+langchain-google-genai
+faiss-cpu
+openai
+pymongo
