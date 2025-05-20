@@ -4,7 +4,6 @@ import logging
 from common import config
 from langchain_core.messages import HumanMessage, AIMessage
 
-# --- Logging Setup ---
 # Configure logging using the level from config
 log_level = getattr(logging, config.LOG_LEVEL, logging.INFO)
 logging.basicConfig(
@@ -12,13 +11,14 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-# --- End Logging Setup ---
+
+# Compile the workflow
+workflow = WorkflowManager().compile_graph()
 
 @cl.on_chat_start
 def on_chat_start():
     logger.info("Chat started. Initializing workflow.")
     try:
-        workflow = WorkflowManager().compile_graph()
         cl.user_session.set("workflow", workflow)
         logger.info("Workflow compiled and stored in user session.")
     except Exception as e:
@@ -28,15 +28,23 @@ def on_chat_start():
 @cl.on_message
 async def on_message(message: cl.Message):
     logger.info(f"Received message: {message.content}")
-    workflow = cl.user_session.get("workflow")
+    config = {"configurable": {"thread_id": cl.context.session.id}}
     if not workflow:
         logger.error("Workflow not found in user session.")
-        await cl.Message(content="Sorry, de workflow is niet correct geïnitialiseerd. Probeer de chat opnieuw te starten.").send()
+        await cl.Message(content="Sorry, er lijkt iets mis te zijn gegaan. Fred is even onbeschikbaar. Probeer het later opnieuw.").send()
         return
 
-    # Initialize state ONLY with the messages list containing the HumanMessage
+    # Retrieve previous messages from session, or start fresh
+    previous_messages = cl.user_session.get("messages", [])
+    # Append the new user message
+    previous_messages.append(HumanMessage(content=message.content))
+
+    # Initialize state with full message history, resolved_entities, and schema cache if present
     initial_state = {
-        "messages": [HumanMessage(content=message.content)]
+        "messages": previous_messages,
+        "resolved_entities": cl.user_session.get("resolved_entities", {}),
+        "schema": cl.user_session.get("schema"),
+        "schema_timestamp": cl.user_session.get("schema_timestamp"),
     }
     logger.debug(f"Initial state for workflow: {initial_state}")
 
@@ -44,7 +52,7 @@ async def on_message(message: cl.Message):
     logger.info("Invoking workflow...")
     try:
         # Use ainvoke to get the final state directly
-        final_state = await workflow.ainvoke(initial_state)
+        final_state = await workflow.ainvoke(initial_state, config)
         logger.info("Workflow invocation finished.")
         logger.debug(f"Final state received: {final_state}") # Log final state at DEBUG
 
@@ -58,6 +66,16 @@ async def on_message(message: cl.Message):
         logger.error(f"Workflow did not return messages in final state. Final state: {final_state}")
         await cl.Message(content="Er is een onbekende fout opgetreden na het uitvoeren van de workflow.").send()
         return
+
+    # Persist updated message history and resolved_entities in user session
+    cl.user_session.set("messages", final_state["messages"])
+
+    if "resolved_entities" in final_state:
+        cl.user_session.set("resolved_entities", final_state["resolved_entities"])
+
+    if "schema" in final_state and "schema_timestamp" in final_state:
+        cl.user_session.set("schema", final_state["schema"])
+        cl.user_session.set("schema_timestamp", final_state["schema_timestamp"])
 
     # Display the natural language answer from the last message in the final state
     # Ensure the last message is indeed an AIMessage (it should be from format_answer_node)
