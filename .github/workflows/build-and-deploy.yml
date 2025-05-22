@@ -22,6 +22,7 @@ jobs:
       - name: Build and deploy Container App
         uses: azure/container-apps-deploy-action@v2
         with:
+          appSourcePath: .
           dockerfilePath: Dockerfile
           registryUrl: ${{ secrets.REGISTRY_URL }}
           registryUsername: ${{ secrets.REGISTRY_USERNAME }}
