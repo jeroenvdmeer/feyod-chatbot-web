@@ -1,8 +1,18 @@
 import chainlit as cl
-from agent.WorkflowManager import WorkflowManager
 import logging
-from common import config
 from langchain_core.messages import HumanMessage, AIMessage
+from typing import Dict, Optional
+from agent.WorkflowManager import WorkflowManager
+from common import config
+
+@cl.oauth_callback
+def oauth_callback(
+  provider_id: str,
+  token: str,
+  raw_user_data: Dict[str, str],
+  default_user: cl.User,
+) -> Optional[cl.User]:
+  return default_user
 
 # Configure logging using the level from config
 log_level = getattr(logging, config.LOG_LEVEL, logging.INFO)
@@ -28,7 +38,10 @@ def on_chat_start():
 @cl.on_message
 async def on_message(message: cl.Message):
     logger.info(f"Received message: {message.content}")
-    config = {"configurable": {"thread_id": cl.context.session.id}}
+    config = {
+        "configurable": {"thread_id": cl.context.session.id},
+        "callbacks": [cl.LangchainCallbackHandler()]
+    }
     if not workflow:
         logger.error("Workflow not found in user session.")
         await cl.Message(content="Sorry, er lijkt iets mis te zijn gegaan. Fred is even onbeschikbaar. Probeer het later opnieuw.").send()
@@ -51,7 +64,7 @@ async def on_message(message: cl.Message):
     final_state = None
     logger.info("Invoking workflow...")
     try:
-        # Use ainvoke to get the final state directly
+        # Use ainvoke to get the final state directly, with Chainlit callback handler for streaming/tracing
         final_state = await workflow.ainvoke(initial_state, config)
         logger.info("Workflow invocation finished.")
         logger.debug(f"Final state received: {final_state}") # Log final state at DEBUG
