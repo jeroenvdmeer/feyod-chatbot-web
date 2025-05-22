@@ -6,13 +6,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:      
       - name: 'Checkout Fred'
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
 
       - name: 'Checkout database'
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
         with:
           repository: jeroenvdmeer/feyod
-          path: ./
+          path: ./feyod
 
       - name: Log in to Azure
         uses: azure/login@v2
