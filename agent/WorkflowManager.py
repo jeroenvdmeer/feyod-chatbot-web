@@ -4,7 +4,7 @@ from datetime import datetime
 import re
 from typing import Dict, Any
 from langgraph.graph import StateGraph, START, END
-from .State import AgentState, find_last_message_by_name, find_last_human_message
+from agent.State import AgentState, find_last_message_by_name, find_last_human_message
 from common.database import get_schema_description, execute_query
 from common.query_processor import generate_sql_from_nl, check_sql_syntax, attempt_fix_sql
 from common.utils.entity_resolution import find_ambiguous_entities, resolve_entities
