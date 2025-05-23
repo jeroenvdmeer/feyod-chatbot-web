@@ -5,15 +5,6 @@ from typing import Dict, Optional
 from agent.WorkflowManager import WorkflowManager
 from common import config
 
-@cl.oauth_callback
-def oauth_callback(
-  provider_id: str,
-  token: str,
-  raw_user_data: Dict[str, str],
-  default_user: cl.User,
-) -> Optional[cl.User]:
-  return default_user
-
 # Configure logging using the level from config
 log_level = getattr(logging, config.LOG_LEVEL, logging.INFO)
 logging.basicConfig(
@@ -24,6 +15,16 @@ logger = logging.getLogger(__name__)
 
 # Compile the workflow
 workflow = WorkflowManager().compile_graph()
+
+# Authentication callback
+@cl.oauth_callback
+def oauth_callback(
+  provider_id: str,
+  token: str,
+  raw_user_data: Dict[str, str],
+  default_user: cl.User,
+) -> Optional[cl.User]:
+  return default_user
 
 @cl.on_chat_start
 def on_chat_start():
