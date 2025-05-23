@@ -1,7 +1,6 @@
 import chainlit as cl
 import logging
 from langchain_core.messages import HumanMessage, AIMessage
-from typing import Dict, Optional
 from agent.WorkflowManager import WorkflowManager
 from common import config
 
