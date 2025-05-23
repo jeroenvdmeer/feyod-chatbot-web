@@ -4,8 +4,13 @@ python-dotenv
 sqlalchemy[aiosqlite]
 aiosqlite
 langchain
+langchain-core
+langchain-community
 langchain-openai
 langchain-google-genai
 faiss-cpu
 openai
 pymongo
+rapidfuzz
+pytest
+pytest-asyncio
