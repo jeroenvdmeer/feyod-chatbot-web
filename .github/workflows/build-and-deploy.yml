@@ -16,6 +16,19 @@ jobs:
           repository: jeroenvdmeer/feyod
           path: ./feyod
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Build SQLite Database
+        run: |
+          echo "Building feyod.db..."
+          cd ./feyod
+          rm -f feyod.db # Ensure clean start
+          sqlite3 feyod.db < feyod.sql
+          echo "Database successfully built."
+
       - name: Log in to Azure
         uses: azure/login@v2
         with:
