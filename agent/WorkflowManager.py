@@ -4,17 +4,34 @@ from datetime import datetime
 import re
 from typing import Dict, Any
 from langgraph.graph import StateGraph, START, END
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import AIMessage
 from agent.State import AgentState, find_last_message_by_name, find_last_human_message
 from common.database import get_schema_description, execute_query
 from common.query_processor import generate_sql_from_nl, check_sql_syntax, attempt_fix_sql
 from common.utils.entity_resolution import find_ambiguous_entities, resolve_entities
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import AIMessage
 from common.llm_factory import get_llm
 from common.utils.memory_utils import _prepare_llm_context
+from common import config
 
 logger = logging.getLogger(__name__)
-MAX_FIX_ATTEMPTS = 1
+
+FORMAT_ANSWER_BASE_PROMPT = """
+Jij bent Fred, een hartstochtelijke fan van de voetbalclub Feyenoord uit Rotterdam-Zuid.
+Jouw doel is om vragen over Feyenoord te beantwoorden.
+Neem de vraag en de resultaten uit de database om een kort en bondig antwoord op de vraag te formuleren.
+Houd rekening met de volgende richtlijnen:
+- Ga nooit antwoorden verzinnen op de vraag van de gebruiker. Gebruik uitsluitend de informatie die jou gegeven hebt.
+- Geef altijd een antwoord in de eerste persoon, alsof jij Fred bent.
+- Als de query geen resultaten opleverde, wees daar dan eerlijk over en zeg dan dat je het antwoord niet weet op de vraag.
+- Refereer nooit naar technische details zoals SQL-query's of database-informatie.
+"""
+
+FORMAT_ERROR_PROMPT = FORMAT_ANSWER_BASE_PROMPT + """
+- Als een foutmelding is opgetreden, laat dan de technische details achterwege.
+- Als je geen antwoord kunt geven, gebruik dan de informatie die jou gegeven is om verduidelijking te vragen. Gebruik hiervoor het database-schema.
+- Als je geen verduidelijke vragen kunt stellen, geef dan een lijst (in Markdown-formaat) met suggesties van maximaal 3 vragen die je wel kunt beantwoorden. Gebruik hiervoor het database-schema.
+"""
 
 def log_message_contents(messages, logger, prefix=""):
     for i, msg in enumerate(messages):
@@ -161,7 +178,6 @@ class WorkflowManager:
         logger.warning("Node: Attempting to fix SQL query")
         log_message_contents(state.get("messages", []), logger, prefix="fix_query_node-")
         messages = state["messages"]
-        # Prepare context for LLM (if needed for future LLM-based query fixing)
         context_messages = await _prepare_llm_context(messages)
         logger.info(f"Using prepared LLM context with {len(context_messages)} messages for query fixing.")
         log_message_contents(context_messages, logger, prefix="fix_query_node-PreparedContext-")
@@ -169,8 +185,12 @@ class WorkflowManager:
         error_msg = find_last_message_by_name(context_messages, "error")
         schema = state.get("schema")
         original_nl_query_msg = find_last_human_message(context_messages)
+
         if not all([invalid_sql_msg, error_msg, schema, original_nl_query_msg]):
-            return {"messages": [AIMessage(content="Cannot fix query: Missing context.", name="error")]} 
+            return {
+                "messages": [AIMessage(content="Cannot fix query: Missing context.", name="error")],
+                "fix_attempts": state.get("fix_attempts", 0) + 1
+            } 
         try:
             fixed_sql = await attempt_fix_sql(
                 invalid_sql=invalid_sql_msg.content,
@@ -178,36 +198,45 @@ class WorkflowManager:
                 schema=schema,
                 original_nl_query=original_nl_query_msg.content
             )
-            return {"messages": [AIMessage(content=fixed_sql, name="sql_query")]} 
+            return {
+                "messages": [AIMessage(content=fixed_sql, name="sql_query")],
+                "fix_attempts": state.get("fix_attempts", 0) + 1
+            } 
         except Exception as e:
             logger.exception("Error attempting to fix SQL")
-            return {"messages": [AIMessage(content=f"Failed to attempt fix: {e}", name="error")]} 
+            return {
+                "messages": [AIMessage(content=f"Failed to attempt fix: {e}", name="error")],
+                "fix_attempts": state.get("fix_attempts", 0) + 1
+            }
 
     async def format_answer_node(self, state: AgentState) -> Dict[str, Any]:
         logger.info("Node: Formatting final answer")
-        log_message_contents(state.get("messages", []), logger, prefix="format_answer_node-")
-        messages = state["messages"]
+        messages = state.get("messages", [])
+        log_message_contents(messages, logger, prefix="format_answer_node-")
+    
         # Prepare context for LLM
-        context_messages = await _prepare_llm_context(messages)
-        logger.info(f"Using prepared LLM context with {len(context_messages)} messages for answer formatting.")
-        log_message_contents(context_messages, logger, prefix="format_answer_node-PreparedContext-")
         llm = get_llm()
-        question_msg = find_last_human_message(context_messages)
-        results_msg = find_last_message_by_name(context_messages, "results")
-        error_msg = find_last_message_by_name(context_messages, "error")
+        log_message_contents(messages, logger, prefix="format_answer_node-PreparedContext-")
+
+        question_msg = find_last_human_message(messages)
+        results_msg = find_last_message_by_name(messages, "results")
+        error_msg = find_last_message_by_name(messages, "error")
+
         if not llm:
             return {"messages": [AIMessage(content="Error: LLM not available to format the final answer.")]} 
         if not question_msg:
-            return {"messages": [AIMessage(content="Error: Could not find original question to formulate answer.")]} 
-        final_answer_prompt = ChatPromptTemplate.from_messages([
-            ("system", "Jij bent Fred, een hartstochtelijke fan van de voetbalclub Feyenoord uit Rotterdam-Zuid. Jouw doel is om vragen over Feyenoord te beantwoorden. Neem de vraag en de resultaten uit de database om een kort en bondig antwoord op de vraag te formuleren. Als de query geen resultaten opleverde, wees daar dan eerlijk over en zeg dat in je antwoord. Ga nooit antwoorden verzinnen."),
-            ("human", "Vraag: {question}\nResultaten: {results}")
-        ])
-        if error_msg and (not results_msg or context_messages.index(error_msg) > context_messages.index(results_msg)):
-            final_answer_content = f"Sorry, ik kon geen antwoord vinden. De volgende fout trad op: {error_msg.content}"
-        elif results_msg:
+            return {"messages": [AIMessage(content="Error: Could not find original question to formulate answer.")]}
+
+        final_answer_content = "Sorry, er is een onverwachte fout opgetreden."
+
+        if results_msg:
             try:
                 results = json.loads(results_msg.content)
+                final_answer_prompt = ChatPromptTemplate.from_messages([
+                    ("system", FORMAT_ANSWER_BASE_PROMPT),
+                    ("human", "Vraag: {question}\n\nResultaten:\n{results}"),
+                ])
+
                 if not results:
                     prompt = final_answer_prompt.format(question=question_msg.content, results="Geen resultaten gevonden.")
                     ai_response = await llm.ainvoke(prompt)
@@ -217,19 +246,33 @@ class WorkflowManager:
                     prompt = final_answer_prompt.format(question=question_msg.content, results=formatted_results)
                     ai_response = await llm.ainvoke(prompt)
                     final_answer_content = ai_response.content
+
             except Exception as e:
                 logger.exception("Error formatting results in final answer")
-                final_answer_content = f"Sorry, er ging iets mis bij het formuleren van het antwoord: {e}"
-        else:
-            final_answer_content = "Sorry, er is een onverwachte status opgetreden in de workflow."
+
+        elif error_msg:
+            final_answer_prompt = ChatPromptTemplate.from_messages([
+                ("system", FORMAT_ERROR_PROMPT),
+                ("human", "Vraag: {question}\n\nFoutmelding:\n{error}\n\nDatabase schema:\n{schema}"),
+            ])
+            prompt = final_answer_prompt.format(
+                question=question_msg.content,
+                error=error_msg.content,
+                schema=state.get("schema")
+            )
+            ai_response = await llm.ainvoke(prompt)
+            final_answer_content = ai_response.content
+
         return {"messages": [AIMessage(content=final_answer_content)]}
 
     def should_fix_or_execute(self, state: AgentState) -> str:
         logger.info("Condition: Checking if query needs fixing or execution.")
-        log_message_contents(state.get("messages", []), logger, prefix="should_fix_or_execute-")
-        messages = state["messages"]
+        messages = state.get("messages", [])
+        fix_attempts = state.get("fix_attempts", 0)
+        log_message_contents(messages, logger, prefix="should_fix_or_execute-")
+
         last_msg = messages[-1] if messages else None
-        if hasattr(last_msg, "name") and last_msg.name == "error":
+        if hasattr(last_msg, "name") and last_msg.name == "error" and fix_attempts < config.MAX_FIX_ATTEMPTS:
             return "fix_query"
         elif hasattr(last_msg, "name") and last_msg.name == "check_result":
             return "execute_query"
@@ -282,7 +325,7 @@ class WorkflowManager:
             {
                 "fix_query": "fix_query",
                 "execute_query": "execute_query",
-                "format_answer": "format_answer" # Route errors directly to formatting
+                "format_answer": "format_answer"
             }
         )
 
@@ -295,7 +338,7 @@ class WorkflowManager:
             self.after_execution,
             {
                 "fix_query": "fix_query",
-                "format_answer": "format_answer" # Route success or final errors to formatting
+                "format_answer": "format_answer"
             }
         )
 

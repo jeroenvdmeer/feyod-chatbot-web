@@ -58,6 +58,7 @@ async def on_message(message: cl.Message):
         "resolved_entities": cl.user_session.get("resolved_entities", {}),
         "schema": cl.user_session.get("schema"),
         "schema_timestamp": cl.user_session.get("schema_timestamp"),
+        "fix_attempts": 0 # Reset fix attempts for each new message to 0.
     }
     logger.debug(f"Initial state for workflow: {initial_state}")
 
@@ -67,7 +68,7 @@ async def on_message(message: cl.Message):
         # Use ainvoke to get the final state directly, with Chainlit callback handler for streaming/tracing
         final_state = await workflow.ainvoke(initial_state, config)
         logger.info("Workflow invocation finished.")
-        logger.debug(f"Final state received: {final_state}") # Log final state at DEBUG
+        logger.debug(f"Final state received: {final_state}")
 
     except Exception as e:
         logger.exception("An error occurred during workflow invocation.")

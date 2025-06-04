@@ -7,6 +7,7 @@ class AgentState(TypedDict, total=False):
     resolved_entities: dict[str, str]  # Track entity mappings throughout the workflow
     schema: str  # Cached database schema
     schema_timestamp: str  # ISO timestamp when schema was retrieved
+    fix_attempts: int  # Number of attempts taken to fix the SQL query
 
 def find_last_message_by_name(messages: List[AnyMessage], name: str) -> AnyMessage | None:
     """Find the last message with a specific name in the list of messages."""
