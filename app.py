@@ -1,8 +1,5 @@
 import chainlit as cl
 import logging
-import sys
-import os
-
 from langchain_core.messages import HumanMessage, AIMessage
 from nl2sql.src.workflow.manager import WorkflowManager
 from nl2sql.src.workflow import config
@@ -17,15 +14,9 @@ logger = logging.getLogger(__name__)
 
 # --- Workflow Initialization ---
 # Create a configuration dictionary from the imported config module
-app_config = {
-    "FEYOD_DATABASE_URL": config.FEYOD_DATABASE_URL,
-    "OPENAI_API_KEY": config.OPENAI_API_KEY,
-    "MAX_SQL_FIX_ATTEMPTS": config.MAX_SQL_FIX_ATTEMPTS,
-}
-
 try:
     # Instantiate the manager with the app config.
-    workflow_manager = WorkflowManager(config=app_config, format_output=True)
+    workflow_manager = WorkflowManager(format_output=True)
     workflow = workflow_manager.get_graph()
     logger.info("WorkflowManager initialized and graph compiled successfully.")
 except Exception as e:
