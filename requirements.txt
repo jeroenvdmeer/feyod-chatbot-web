@@ -1,10 +1,17 @@
--e ./nl2sql
 chainlit
+pydantic
 python-dotenv
-langchain-openai
-langchain
-langchain-core
 aiosqlite
 sqlalchemy
 greenlet
-psycopg2-binary
+rapidfuzz
+black
+
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-openai
+langchain-google-genai
+faiss-cpu
+pymongo
